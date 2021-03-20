@@ -1,0 +1,456 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+library(caret)
+library(Matrix)
+library(glmnet)
+```
+
+```{r}
+train = read.csv("data apres netoyage/train_data.csv",sep=';')
+head(train)
+```
+
+```{r}
+train = subset(train, select = -c(TransactionID, TransactionDT, card1, card2, card5, card3, addr1, addr2))
+```
+
+
+```{r}
+train$isFraud = factor(train$isFraud)
+train$card4 = factor(train$card4)
+train$card6 = factor(train$card6)
+```
+
+```{r}
+# list types of each variable
+type = data.frame(unlist(sapply(train, class)))
+table(type)
+```
+
+## Transformer les variables categorielles en Dummy variables
+```{r}
+dataWithoutDummies = subset(train, select =-c(card6, ProductCD, card4))
+
+d <- dummyVars("~ card6+ ProductCD+ card4",data=train,fullRank=T)
+dummy <- data.frame(predict(d, newdata=train))
+train <- cbind(dummy, dataWithoutDummies)
+```
+
+```{r}
+rm(dummy)
+rm(dataWithoutDummies)
+```
+
+```{r}
+summary(train)
+```
+
+## undersampling pour résoudre le problème des données non équilibrées
+```{r}
+notfrauds = dim(train[train$isFraud == 0,])[1]
+frauds = dim(train[train$isFraud == 1,])[1]
+```
+
+```{r}
+isFraud.index = which(train$isFraud == 1)
+notFraud.index = which(train$isFraud == 0)
+
+set.seed(123)
+
+#data = cbind(scaled_data.X, data.Y)
+
+pick_idfraud <- sample(isFraud.index, frauds)
+pick_notFraud <- sample(notFraud.index, frauds)
+
+train <- train[c(pick_idfraud, pick_notFraud), ]
+
+rm(pick_idfraud)
+rm(pick_notFraud)
+```
+
+#shuffle
+```{r}
+rows <- sample(nrow(train))
+train <- train[rows, ]
+
+rm(rows)
+```
+
+### Scaling data
+```{r}
+data.X = subset(train, select = -c(isFraud))
+data.Y = subset(train, select = c(isFraud))
+```
+
+```{r}
+rm(train)
+```
+
+```{r}
+scaled_data.X = scale(data.X)
+```
+
+```{r}
+rm(data.X)
+```
+
+```{r}
+scaled_data.X = data.frame(scaled_data.X)
+
+data = cbind(scaled_data.X, data.Y)
+
+rm(scaled_data.X)
+```
+
+
+```{r}
+head(data.Y)
+```
+
+
+```{r}
+# train_ind <- sample(rownames(data), nrow(data)*.8)
+# data.train <- data[train_ind, ]
+# data.val <- data[train_ind, ]
+```
+
+```{r}
+training.sampling <- createDataPartition(data$isFraud, p =0.8, list = FALSE)
+data.train <- data[training.sampling, ]
+data.val <- data[-training.sampling, ]
+
+rm(data)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Simple logistique regression
+```{r}
+mylogit = glm(isFraud ~ ., data.train, family = "binomial", control = list(maxit = 50))
+summary(mylogit)
+```
+
+```{r}
+fraud.predit = predict(mylogit, type = 'response', data.val)
+
+```
+
+```{r}
+head(fraud.predit)
+```
+
+## accuracy  = 67.75%
+```{r}
+predicted = ifelse(fraud.predit>.5, 1, 0)
+table(factor(predicted), factor(data.val$isFraud))
+```
+
+```{r}
+confusionMatrix(factor(predicted), factor(data.val$isFraud))
+```
+
+```{r}
+sum(predicted)
+```
+
+```{r}
+table(factor(predicted), factor(data.val$isFraud))
+```
+
+
+```{r}
+h <- hist(fraud.predit)
+text(h$mids,h$counts,labels=h$counts, adj=c(0.5, -0.5))
+```
+
+
+```{r}
+ctable <- table(factor(predicted), data.val$isFraud)
+fourfoldplot(ctable, color = c("#CC6666", "#99CC99"),
+             conf.level = 0, margin = 1, main = "Confusion Matrix")
+```
+
+
+### recuperer la data deja developé
+```{r}
+data.train = read.csv('data apres netoyage/data_de_train.csv')
+rownames(data.train) = data.train_$X
+data.train = subset(data.train, select =-c(X))
+
+rm(data.train.X)
+rm(data.train.Y)
+
+test = read.csv('data apres netoyage/data_de_test.csv')
+rownames(test) = test$X
+test = subset(test, select =-c(X))
+
+# length(intersect(colnames(test),colnames(data.train)))
+head(test)
+```
+
+
+# Selection de variable penalisation lasso:
+### Determiner le bon lambda par la validation croisée
+
+```{r}
+data.train.X = data.matrix(subset(data.train,select =-c(isFraud)))
+data.train.Y = data.matrix(subset(data.train,select = c(isFraud)))
+rm(data.train)
+
+set.seed(123)
+
+
+cv.lasso <- cv.glmnet(data.train.X,
+                      data.train.Y, 
+                      alpha = 1, 
+                      family = "binomial")
+```
+
+
+```{r}
+summary(cv.lasso)
+lambda_min = cv.lasso$lambda.min
+lambda_min
+```
+
+```{r}
+plot(cv.lasso)
+```
+
+```{r}
+coef(cv.lasso, cv.lasso$lambda.min)
+```
+
+```{r}
+coef(cv.lasso, cv.lasso$lambda.1se)
+```
+## 75,02% d'accuracy
+```{r}
+
+mylogit_penalised_lasso_min_ <- glmnet(data.train.X,
+                    data.train.Y,
+                    alpha = 1, family = "binomial",
+                    lambda = cv.lasso$lambda.min)
+
+fraud.predit_min = predict(mylogit_penalised_lasso_min_, type = 'response', data.matrix(subset(data.val, select = -c(isFraud))))
+
+predicted_min = ifelse(fraud.predit_min>.5, 1, 0)
+table(factor(predicted_min), data.val$isFraud)
+
+```
+
+```{r}
+h_min <- hist(fraud.predit_min)
+text(h_min$mids,h_min$counts,labels=h_min$counts, adj=c(0.5, -0.5))
+
+ctable <- table(factor(predicted_min), data.val$isFraud)
+fourfoldplot(ctable, color = c("#CC6666", "#99CC99"),
+             conf.level = 0, margin = 1, main = "Confusion Matrix")
+```
+
+```{r}
+confusionMatrix(factor(predicted_min), factor(data.val$isFraud))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Sauvegarder les données d'aprentissage et de validation des modele 
+
+
+```{r}
+write.csv(data.train,'data apres netoyage/data_de_train.csv')
+write.csv(data.val,'data apres netoyage/data_de_validation.csv')
+
+rm(data.train)
+rm(data.val)
+```
+
+```{r}
+data.train = read.csv('data apres netoyage/data_de_train.csv')
+data.val = read.csv('data apres netoyage/data_de_validation.csv')
+```
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+mylogit_penalised_1se <- glmnet(data.train.X,
+                    data.train.Y,
+                    alpha = 1, family = "binomial",
+                    lambda = cv.lasso$lambda.1se)
+
+fraud.predit_1se= predict(mylogit_penalised_1se, type = 'response',
+                          data.matrix(subset(data.val, select = -c(isFraud))))
+
+predicted_1se = ifelse(fraud.predit_1se>.5, 1, 0)
+table(factor(predicted_1se), data.val$isFraud)
+
+h_1se <- hist(fraud.predit_1se)
+text(h_1se$mids,h_1se$counts,labels=h_1se$counts, adj=c(0.5, -0.5))
+
+ctable_1se <- table(factor(predicted_1se), data.val$isFraud)
+fourfoldplot(ctable_1se, color = c("#CC6666", "#99CC99"),
+             conf.level = 0, margin = 1, main = "Confusion Matrix")
+```
+
+
+```{r}
+confusionMatrix(factor(predicted_1se), factor(data.val$isFraud))
+```
+
+
+
+# Selection de variable penalisation ridge:
+### Determiner le bon lambda par la validation croisée
+
+```{r}
+set.seed(42)
+library(glmnet)
+library(Matrix)
+cv.ridge <- cv.glmnet(data.train.X,
+                      data.train.Y, 
+                      alpha = 0, 
+                      family = "binomial")
+```
+
+```{r}
+summary(cv.ridge)
+cv.ridge$lambda.1se
+```
+
+
+
+```{r}
+plot(cv.ridge)
+```
+
+
+
+### using lambda = cv.ridge$lambda.min
+```{r}
+mylogit_penalised_ridge_min <- glmnet(data.train.X,
+                    data.train.Y,
+                    alpha = 0, family = "binomial",
+                    lambda = cv.ridge$lambda.min)
+
+fraud.predit_ridge_min = predict(mylogit_penalised_ridge_min, type = 'response', data.matrix(subset(data.val, select = -c(isFraud))))
+
+predicted_ridge_min = ifelse(fraud.predit_ridge_min>.5, 1, 0)
+table(factor(predicted_ridge_min), data.val$isFraud)
+
+
+ctable <- table(factor(predicted_mridge_min), data.val$isFraud)
+fourfoldplot(ctable, color = c("#CC6666", "#99CC99"),
+             conf.level = 0, margin = 1, main = "Confusion Matrix")
+
+
+confusionMatrix(factor(predicted_ridge_min), factor(data.val$isFraud))
+```
+
+### using lambda = cv.ridge$lambda.1se
+```{r}
+mylogit_penalised_ridge_1se <- glmnet(data.train.X,
+                    data.train.Y,
+                    alpha = 0, family = "binomial",
+                    lambda = cv.ridge$lambda.1se)
+
+fraud.predit_ridge_1se = predict(mylogit_penalised_ridge_1se, type = 'response', data.matrix(subset(data.val, select = -c(isFraud))))
+
+predicted_ridge_1se = ifelse(fraud.predit_ridge_1se>.5, 1, 0)
+table(factor(predicted_ridge_1se), data.val$isFraud)
+
+
+ctable <- table(factor(predicted_ridge_1se), data.val$isFraud)
+fourfoldplot(ctable, color = c("#CC6666", "#99CC99"),
+             conf.level = 0, margin = 1, main = "Confusion Matrix")
+```
+
+
+```{r}
+summary(mylogit_penalised_ridge_1se)
+```
+
+
+```{r}
+library(caret)
+confusionMatrix(factor(predicted_ridge_1se), data.val$isFraud)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+### appliquer le modele modele de regression logistique + penalisation lasso sur les données de test
+```{r}
+# partie test
+test = read.csv("data apres netoyage/test_data.csv",sep=';')
+
+TransactionID_test = test$TransactionID
+rownames(test) <- test$TransactionID
+
+test = subset(test, select = -c(TransactionID, TransactionDT, card1, card2, card5,
+                                card3, addr1, addr2))
+
+dummy_test <- data.frame(predict(d, newdata=test))
+test <- cbind(dummy_test, subset(test, select =-c(card6, ProductCD, card4)))
+
+write.csv(test,'data apres netoyage/data_de_test.csv')
+
+rm(dummy_test)
+
+test = scale(test)
+head(test)
+
+
+```

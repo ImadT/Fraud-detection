@@ -1,0 +1,120 @@
+---
+title: "modeling regression logistique_lasso"
+author: "imad touach"
+date: "14/03/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(caret)
+library(Matrix)
+library(glmnet)
+```
+
+### recuperer la data deja developé
+```{r}
+data.train = read.csv('data_de_train.csv')
+rownames(data.train) = data.train$X
+data.train = subset(data.train, select =-c(X))
+
+data.val = read.csv('data_de_validation.csv')
+rownames(data.val) = data.val$X
+data.val = subset(data.val, select =-c(X))
+
+train = rbind(data.train, data.val)
+
+rm(data.train)
+rm(data.val)
+
+```
+
+```{r}
+train.X = data.matrix(subset(train,select =-c(isFraud)))
+train.Y = data.matrix(subset(train,select = c(isFraud)))
+rm(train)
+
+set.seed(123)
+
+cv.lasso <- cv.glmnet(train.X,
+                      train.Y, 
+                      alpha = 1, 
+                      family = "binomial")
+```
+
+
+```{r}
+summary(cv.lasso)
+lambda_min = cv.lasso$lambda.min
+lambda_min
+```
+
+```{r}
+plot(cv.lasso)
+```
+
+
+```{r}
+coef(cv.lasso, cv.lasso$lambda.min)
+```
+
+
+## 75,02% d'accuracy
+
+```{r}
+
+mylogit_penalised_lasso_min <- glmnet(train.X,
+                    train.Y,
+                    alpha = 1, family = "binomial",
+                    lambda = cv.lasso$lambda.min)
+
+mylogit_penalised_lasso_min$beta
+```
+
+```{r}
+rm(train.X)
+rm(train.Y)
+```
+
+```{r}
+test = read.csv('data_de_test.csv')
+rownames(test) = test$X
+test = subset(test, select =-c(X))
+
+# length(intersect(colnames(test),colnames(data.train)))
+head(test)
+```
+
+```{r}
+test = scale(test)
+```
+```{r}
+i = 0
+```
+
+```{r}
+sum(is.na(test))
+#predict using test data
+test[is.na(test)] = 0
+
+
+fraud.predit_min_test = predict(mylogit_penalised_lasso_min, type = 'response', data.matrix(test))
+
+
+result = data.frame(fraud.predit_min_test)
+head(result)
+```
+
+```{r}
+head(result)
+write.csv(result,'resultat_2.csv')
+```
+
+
+
+
+
+
